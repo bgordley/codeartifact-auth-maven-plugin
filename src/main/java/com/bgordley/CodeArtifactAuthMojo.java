@@ -11,7 +11,6 @@ import io.vavr.control.Try;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
-import org.apache.commons.exec.environment.EnvironmentUtils;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
@@ -24,15 +23,15 @@ import software.amazon.awssdk.services.codeartifact.model.GetAuthorizationTokenR
 @Mojo(name = "codeartifact-auth", defaultPhase = LifecyclePhase.COMPILE)
 public class CodeArtifactAuthMojo extends AbstractMojo {
 
-    private static final String CODEARTIFACT_ENV_VAR = "CODEARTIFACT_AUTH_TOKEN";
+    private static final String PROPERTY_KEY = "codeartifact.auth.token";
 
-    @Parameter(property = "scope", required = true)
+    @Parameter(property = "domain", required = true)
     String domain;
 
-    @Parameter(property = "scope", required = true)
+    @Parameter(property = "domainOwner", required = true)
     String domainOwner;
 
-    @Parameter(property = "scope")
+    @Parameter(property = "durationSeconds")
     Long durationSeconds;
 
     public void execute() throws MojoExecutionException {
@@ -40,19 +39,17 @@ public class CodeArtifactAuthMojo extends AbstractMojo {
             domain, domainOwner, durationSeconds);
         String token = getAuthorizationToken(getCodeArtifactClient(), request);
 
-        addEnvVar(CODEARTIFACT_ENV_VAR, token);
+        addSystemProperty(PROPERTY_KEY, token);
+
+        String dumb = "";
     }
 
-    protected void addEnvVar(String varName, String varValue) throws MojoExecutionException {
-        Try
-            .of(EnvironmentUtils::getProcEnvironment)
-            .andThenTry(envVarMap -> EnvironmentUtils.addVariableToEnvironment(
-                envVarMap, String.format("%s=%s", varName, varValue)))
-            .onFailure(ex -> logError("Failed to create environment variable '%s'", varName))
+    protected void addSystemProperty(String key, String value) throws MojoExecutionException {
+        Try.of(() -> System.setProperty(key, value))
             .onSuccess(envVarMap -> logInfo(
-                "Successfully added environment variable '%s'.", varName))
+                "Successfully set system property '%s'.", key))
             .getOrElseThrow(ex -> new MojoExecutionException(
-                String.format("Failed to create environment variable '%s'.", varName)
+                String.format("Failed to set system property '%s'", key)
             ));
     }
 
@@ -66,7 +63,9 @@ public class CodeArtifactAuthMojo extends AbstractMojo {
                 "Successfully retrieved AWS authorization token for domain '%s' and domainOwner '%s'.",
                 request.domain(), request.domainOwner()))
             .getOrElseThrow(ex -> new MojoExecutionException(
-                "Failed to retrieve AWS CodeArtifact authorization token.", ex));
+                String.format(
+                    "Failed to retrieved AWS authorization token for domain '%s' and domainOwner '%s'.",
+                    request.domain(), request.domainOwner()), ex));
     }
 
     protected GetAuthorizationTokenRequest getAuthorizationTokenRequest(String domain,
@@ -90,7 +89,7 @@ public class CodeArtifactAuthMojo extends AbstractMojo {
     }
 
     private void logInfo(String message, Object... params) {
-        log(getLog()::error, message, params);
+        log(getLog()::info, message, params);
     }
 
     private void log(Consumer<CharSequence> logConsumer, String message, Object... params) {
