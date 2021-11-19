@@ -10,7 +10,6 @@ package com.bgordley;
 import io.vavr.control.Try;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.Consumer;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
@@ -22,8 +21,6 @@ import software.amazon.awssdk.services.codeartifact.model.GetAuthorizationTokenR
 
 @Mojo(name = "codeartifact-auth", defaultPhase = LifecyclePhase.COMPILE)
 public class CodeArtifactAuthMojo extends AbstractMojo {
-
-    private static final String PROPERTY_KEY = "codeartifact.auth.token";
 
     @Parameter(property = "domain", required = true)
     String domain;
@@ -39,15 +36,13 @@ public class CodeArtifactAuthMojo extends AbstractMojo {
             domain, domainOwner, durationSeconds);
         String token = getAuthorizationToken(getCodeArtifactClient(), request);
 
-        addSystemProperty(PROPERTY_KEY, token);
-
-        String dumb = "";
+        addSystemProperty(getPropertyKey(), token);
     }
 
     protected void addSystemProperty(String key, String value) throws MojoExecutionException {
         Try.of(() -> System.setProperty(key, value))
-            .onSuccess(envVarMap -> logInfo(
-                "Successfully set system property '%s'.", key))
+            .onSuccess(envVarMap -> getLog().info(
+                String.format("Successfully set system property '%s'.", key)))
             .getOrElseThrow(ex -> new MojoExecutionException(
                 String.format("Failed to set system property '%s'", key)
             ));
@@ -59,9 +54,9 @@ public class CodeArtifactAuthMojo extends AbstractMojo {
         return Try
             .withResources(() -> codeartifactClient)
             .of(client -> client.getAuthorizationToken(request).authorizationToken())
-            .onSuccess(token -> logInfo(
+            .onSuccess(token -> getLog().info(String.format(
                 "Successfully retrieved AWS authorization token for domain '%s' and domainOwner '%s'.",
-                request.domain(), request.domainOwner()))
+                request.domain(), request.domainOwner())))
             .getOrElseThrow(ex -> new MojoExecutionException(
                 String.format(
                     "Failed to retrieved AWS authorization token for domain '%s' and domainOwner '%s'.",
@@ -78,21 +73,13 @@ public class CodeArtifactAuthMojo extends AbstractMojo {
             .build();
     }
 
+    protected String getPropertyKey() {
+        return "codeartifact.auth.token";
+    }
+
     protected CodeartifactClient getCodeArtifactClient() {
         return CodeartifactClient.builder()
             .credentialsProvider(DefaultCredentialsProvider.create())
             .build();
-    }
-
-    private void logError(String message, Object... params) {
-        log(getLog()::error, message, params);
-    }
-
-    private void logInfo(String message, Object... params) {
-        log(getLog()::info, message, params);
-    }
-
-    private void log(Consumer<CharSequence> logConsumer, String message, Object... params) {
-        logConsumer.accept(String.format(message, params));
     }
 }
