@@ -11,11 +11,12 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
-import java.util.Objects;
-import java.util.Optional;
+import java.security.AccessControlException;
+import java.util.PropertyPermission;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.junit.After;
 import org.junit.Before;
@@ -25,6 +26,7 @@ import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.MockitoJUnitRunner;
 import software.amazon.awssdk.services.codeartifact.CodeartifactClient;
+import software.amazon.awssdk.services.codeartifact.model.AccessDeniedException;
 import software.amazon.awssdk.services.codeartifact.model.GetAuthorizationTokenRequest;
 import software.amazon.awssdk.services.codeartifact.model.GetAuthorizationTokenResponse;
 
@@ -36,6 +38,9 @@ public class CodeArtifactAuthMojoTest {
     private final String testDomain = "test-domain";
     private final String testDomainOwner = "test-domain-owner";
     private final Long testDurationSeconds = 60L;
+
+    @Mock
+    private SecurityManager mockSecurityManager;
 
     @Mock
     private CodeartifactClient mockCodeArtifactClient;
@@ -52,8 +57,13 @@ public class CodeArtifactAuthMojoTest {
 
     @After
     public void tearDown() {
-        reset(mockCodeArtifactClient, spyCodeArtifactAuthMojo);
+        reset(
+            mockSecurityManager,
+            mockCodeArtifactClient,
+            spyCodeArtifactAuthMojo
+        );
 
+        System.setSecurityManager(null);
         System.clearProperty(this.testKey);
     }
 
@@ -110,6 +120,22 @@ public class CodeArtifactAuthMojoTest {
         assertEquals(this.testValue, token);
     }
 
+    @Test(expected = MojoExecutionException.class)
+    public void getAuthorizationToken_ThrowsException() throws MojoExecutionException {
+        doThrow(AccessDeniedException.builder().build())
+            .when(this.mockCodeArtifactClient)
+            .getAuthorizationToken(any(GetAuthorizationTokenRequest.class));
+
+        GetAuthorizationTokenRequest request = GetAuthorizationTokenRequest.builder()
+            .domain(this.testDomain)
+            .domainOwner(this.testDomainOwner)
+            .durationSeconds(this.testDurationSeconds)
+            .build();
+
+        this.spyCodeArtifactAuthMojo.getAuthorizationToken(
+            mockCodeArtifactClient, request);
+    }
+
     @Test
     public void getCodeArtifactClient() {
         CodeartifactClient client = this.spyCodeArtifactAuthMojo.getCodeArtifactClient();
@@ -125,11 +151,21 @@ public class CodeArtifactAuthMojoTest {
     }
 
     @Test
-    public void addEnvVar() throws MojoExecutionException {
+    public void addSystemProperty() throws MojoExecutionException {
         assertNull(System.getProperty(this.testKey));
 
         this.spyCodeArtifactAuthMojo.addSystemProperty(this.testKey, this.testValue);
 
         assertEquals(this.testValue, System.getProperty(this.testKey));
+    }
+
+    @Test(expected = MojoExecutionException.class)
+    public void addSystemProperty_ThrowsException() throws MojoExecutionException {
+        doThrow(new AccessControlException("Test access failure."))
+            .when(this.mockSecurityManager).checkPermission(any(PropertyPermission.class));
+
+        System.setSecurityManager(this.mockSecurityManager);
+
+        this.spyCodeArtifactAuthMojo.addSystemProperty(this.testKey, this.testValue);
     }
 }
